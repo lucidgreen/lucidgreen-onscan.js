@@ -16,8 +16,9 @@
 		 */
 		attachTo: function(oDomElement, oOptions) {
 	
-			if(oDomElement.scannerDetectionData !== undefined){
-				throw new Error("onScan.js is already initialized for DOM element " + oDomElement);
+			if (oDomElement.scannerDetectionData !== undefined) {
+				console.log('onScan.js is already initialized for DOM element', oDomElement);
+				return;
 			}
 	
 			var oDefaults = {
@@ -39,25 +40,30 @@
 				stopPropagation:false, // Stop immediate propagation on keypress event
 				preventDefault:false, // Prevent default action on keypress event
 				captureEvents:false, // Get the events before any listeners deeper in the DOM
-				reactToKeydown:true, // look for scan input in keyboard events
+				reactToKeydown:true, // look for scan input in keyboard events [ TODO: will not be used ]
 				reactToPaste:false, // look for scan input in paste events
 				singleScanQty: 1, // Quantity of Items put out to onScan in a single scan
-			}
-									
+				useKeypressOverKeyDown: false, // to use keypress instead of keydown
+				validators: [], // array of functions to validate the input
+				unlockCountDown: 5000, // time to wait before resetting the in process scan
+			};
+
 			oOptions = this._mergeOptions(oDefaults, oOptions);
 	
 			// initializing options and variables on DomElement
 			oDomElement.scannerDetectionData = {
-					options: oOptions,
-					vars:{
-						firstCharTime: 0,
-						lastCharTime: 0,
-						accumulatedString: '',
-						testTimer: false,
-						longPressTimeStart: 0,
-						longPressed: false
-					}
-				
+				options: oOptions,
+				vars:{
+					firstCharTime: 0,
+					lastCharTime: 0,
+					accumulatedString: '',
+					testTimer: false,
+					longPressTimeStart: 0,
+					longPressed: false,
+					isCurrentlyProcessing: false,
+					isCurrentlyProcessingTimeout: null,
+				}
+
 			};
 			
 			// initializing handlers (based on settings)
@@ -67,29 +73,46 @@
 			if (oOptions.scanButtonKeyCode !== false){
 				oDomElement.addEventListener("keyup", this._handleKeyUp, oOptions.captureEvents);
 			}
-			if (oOptions.reactToKeydown === true || oOptions.scanButtonKeyCode !== false){	
-				oDomElement.addEventListener("keydown", this._handleKeyDown, oOptions.captureEvents);
+			if (!oOptions.useKeypressOverKeyDown === true || oOptions.scanButtonKeyCode !== false){
+				oDomElement.addEventListener("keydown", this._handleKeyEvent, oOptions.captureEvents);
 			}
+
+			if (oOptions.useKeypressOverKeyDown) {
+				oDomElement.addEventListener('keypress', this._handleKeyEvent, oOptions.captureEvents);
+			}
+
 			return this;
 		},
-		
+
+		initAndListenToScans: function (oDomElement, oOptions) {
+			return this.attachTo(oDomElement, oOptions);
+		},
+
 		/**
-		 * 
+		 *
 		 * @param DomElement oDomElement
 		 * @return void
 		 */
 		detachFrom: function(oDomElement) {
 			// detaching all used events
 			if (oDomElement.scannerDetectionData.options.reactToPaste){
-				oDomElement.removeEventListener("paste", this._handlePaste);
+				oDomElement.removeEventListener("paste", this._handlePaste, oDomElement.scannerDetectionData.options.captureEvents);
 			}
+
 			if (oDomElement.scannerDetectionData.options.scanButtonKeyCode !== false){
-				oDomElement.removeEventListener("keyup", this._handleKeyUp);
+				oDomElement.removeEventListener("keyup", this._handleKeyUp, oDomElement.scannerDetectionData.options.captureEvents);
 			}
-			oDomElement.removeEventListener("keydown", this._handleKeyDown);
-			
+
+			if (oDomElement.scannerDetectionData.options.useKeypressOverKeyDown) {
+				oDomElement.addEventListener('keypress', this._handleKeyEvent, oDomElement.scannerDetectionData.options.captureEvents);
+			}
+
+			if (!oDomElement.scannerDetectionData.options.useKeypressOverKeyDown) {
+				oDomElement.removeEventListener('keydown', this._handleKeyEvent, oDomElement.scannerDetectionData.options.captureEvents);
+			}
+
 			// clearing data off DomElement
-			oDomElement.scannerDetectionData = undefined; 
+			oDomElement.scannerDetectionData = undefined;
 			return;
 		},
 		
@@ -184,40 +207,85 @@
 		},
 		
 		/**
-		 * Simulates a scan of the provided code.
-	     *
-		 * The scan code can be defined as
-		 * - a string - in this case no keyCode decoding is done and the code is merely validated
-		 * against constraints like minLenght, etc.
-		 * - an array of keyCodes (e.g. `[70,71,80]`) - will produce `keydown` events with corresponding
-		 * `keyCode` properties. NOTE: these events will have empty `key` properties, so decoding may
-		 * yield different results than with native events.
-		 * - an array of objects (e.g. `[{keyCode: 70, key: "F", shiftKey: true}, {keyCode: 71, key: "g"}]`) -
-		 * this way almost any event can be simulated, but it's a lot of work to do.
-		 *
-		 * @param DomElement oDomElement
-		 * @param string|array mStringOrArray
+		 * Simulates a scan of the provided string code. by dispatching custom events
 		 * @return self
+		 * @param oDomElement
+		 * @param string
+		 * @param dispatchEnterSuffix
 		 */
-		simulate: function(oDomElement, mStringOrArray){
+		bypassAndSimulateScan(oDomElement, string, dispatchEnterSuffix = false) {
 			this._reinitialize(oDomElement);
-			if (Array.isArray(mStringOrArray)){
-				mStringOrArray.forEach(function(mKey){
-					var oEventProps = {};
-					if( (typeof mKey === "object" || typeof mKey === 'function') && (mKey !== null) ) {
-						oEventProps = mKey;
-					} else {
-						oEventProps.keyCode = parseInt(mKey);
-					}
-					var oEvent = new KeyboardEvent('keydown', oEventProps);
-					document.dispatchEvent(oEvent);
-				})
-			} else {
-				this._validateScanCode(oDomElement, mStringOrArray);
+			for (let i = 0; i < string.length; i++) {
+				const key = string[i];
+				this.dispatchCustomKeyEvent(
+					oDomElement,
+					{
+						key,
+						code: key.charCodeAt(0),
+						keyCode: key.charCodeAt(0),
+						which: key.charCodeAt(0),
+					},
+					{ bypassOnscan: true },
+				);
 			}
+
+			if (dispatchEnterSuffix) {
+				this.dispatchCustomKeyEvent(oDomElement, {
+					key: 'Enter',
+					code: 'Enter',
+					charCode: 13,
+					keyCode: 13,
+					which: 13,
+				}, { bypassOnscan: true });
+			}
+
 			return this;
 		},
-		
+
+		dispatchCustomKeyEvent(oDomElement, eventDict, customProperty) {
+			if (typeof CustomKeyEvent === 'undefined') {
+				return;
+			}
+
+			const oScannerData = oDomElement.scannerDetectionData;
+			const oOptions = oScannerData.options;
+			const eventType = oOptions.useKeypressOverKeyDown ? 'keypress' : 'keydown';
+			// Create an instance of the custom event
+			const event = new CustomKeyEvent(eventType, customProperty, {
+				...eventDict,
+				bubbles: true,
+				cancelable: true,
+				composed: true,
+				view: window,
+			});
+
+			// Dispatch the event on the document object
+			oDomElement.dispatchEvent(event);
+		},
+
+		disableScans(oDomElement) {
+			const oVars = oDomElement.scannerDetectionData.vars;
+			oVars.isCurrentlyProcessing = true;
+			onScan.autoEnableScansAfterCountdown(oDomElement);
+		},
+
+		autoEnableScansAfterCountdown(oDomElement) {
+			const oOptions = oDomElement.scannerDetectionData.options;
+			const oVars = oDomElement.scannerDetectionData.vars;
+
+			oVars.isCurrentlyProcessingTimeout = setTimeout(
+				onScan.enableScans,
+				oOptions.unlockCountDown,
+				oDomElement,
+			);
+		},
+
+		enableScans(oDomElement) {
+			const oVars = oDomElement.scannerDetectionData.vars;
+			oVars.isCurrentlyProcessing = false;
+			clearTimeout(oDomElement.scannerDetectionData.vars.isCurrentlyProcessingTimeout);
+		},
+
 		/**
 		 * @private
 		 * @param DomElement oDomElement
@@ -259,82 +327,159 @@
 			}
 			
 			// if the active element is not listed in the ignoreIfFocusOn option, return false
-		    return false;
-	    },
-		
-	    /**
-	     * Validates the scan code accumulated by the given DOM element and fires the respective events.
-	     * 
-	     * @private
-	     * @param DomElement oDomElement
-	     * @return boolean
-	     */
-		_validateScanCode: function(oDomElement, sScanCode){
-			var oScannerData = oDomElement.scannerDetectionData;			
-			var oOptions = oScannerData.options;
-			var iSingleScanQty = oScannerData.options.singleScanQty;
-			var iFirstCharTime = oScannerData.vars.firstCharTime;
-			var iLastCharTime = oScannerData.vars.lastCharTime;
-			var oScanError = {};
-	        var oEvent;
-	        
-			switch(true){
-				
-				// detect codes that are too short
-				case (sScanCode.length < oOptions.minLength):
-					oScanError = {
-						message: "Received code is shorter than minimal length"
-					};
-					break;
-					
-				// detect codes that were entered too slow	
-				case ((iLastCharTime - iFirstCharTime) > (sScanCode.length * oOptions.avgTimeByChar)):
-					oScanError = {
-						message: "Received code was not entered in time"
-					};				
-					break;
-					
-				// if a code was not filtered out earlier it is valid	
-				default:
-					oOptions.onScan.call(oDomElement, sScanCode, iSingleScanQty);
-					oEvent = new CustomEvent(
-						'scan',
-						{	
-							detail: { 
-								scanCode: sScanCode,
-								qty: iSingleScanQty
-							}
-						}
-					);
-					oDomElement.dispatchEvent(oEvent);
-					onScan._reinitialize(oDomElement);
-					return true;
+			return false;
+		},
+
+		/**
+		 * Validates if the event target is an ignored element.
+		 * @param oDomElement
+		 * @param event
+		 * @returns {boolean}
+		 * @private
+		 */
+		_isEventTargetIgnoredElement: function (oDomElement, event) {
+			var ignoreSelectors = oDomElement.scannerDetectionData.options.ignoreIfFocusOn;
+
+			if (!ignoreSelectors) {
+				return false;
 			}
-			
-			// If an error occurred (otherwise the method would return earlier) create an object for errordetection
-			oScanError.scanCode = sScanCode;
-			oScanError.scanDuration = iLastCharTime - iFirstCharTime;
-			oScanError.avgTimeByChar = oOptions.avgTimeByChar;
-			oScanError.minLength = oOptions.minLength;
-			
+
+			const oFocused = event.target;
+
+			// checks if ignored element is an array, and if so it checks if one of the elements of it is an active one
+			if (Array.isArray(ignoreSelectors)) {
+				for (var i = 0; i < ignoreSelectors.length; i++) {
+					if (oFocused.matches(ignoreSelectors[i]) === true) {
+						return true;
+					}
+				}
+				// if the option consists of an single element, it only checks this one
+			} else if (oFocused.matches(ignoreSelectors)) {
+				return true;
+			}
+
+			// if the active element is not listed in the ignoreIfFocusOn option, return false
+			return false;
+		},
+
+		/**
+		 * This function runs the validators on the scan code.
+		 * @private
+		 * @param sScanCode
+		 * @param iFirstCharTime
+		 * @param iLastCharTime
+		 * @param oOptions
+		 * @private
+		 */
+		_runValidators: async function (oDomElement, sScanCode) {
+			const oScannerData = oDomElement.scannerDetectionData;
+			const oOptions = oScannerData.options;
+			const vars = oScannerData.vars;
+			const iFirstCharTime = oScannerData.vars.firstCharTime;
+			const iLastCharTime = oScannerData.vars.lastCharTime;
+
+			const validationSteps = [
+				{
+					validate: () => sScanCode.length >= oOptions.minLength,
+					errorMessage: 'Received code is shorter than minimal length',
+					shouldTriggerEnter: false,
+				},
+				{
+					validate: () => (iLastCharTime - iFirstCharTime)
+						<= (sScanCode.length * oOptions.avgTimeByChar),
+					errorMessage: 'Received code was not entered in time',
+					shouldTriggerEnter: false,
+				},
+				{
+					validate: () => vars.isCurrentlyProcessing === false,
+					errorMessage: 'scan is currently in progress',
+					shouldTriggerEnter: false,
+					shouldPassScanToPage: false,
+				},
+			];
+
+			for (const step of validationSteps) {
+				if (!step.validate()) {
+					return {
+						isValid: false,
+						error: step.errorMessage,
+						shouldTriggerEnterEvent: step.shouldTriggerEnter,
+						shouldPassScanToPage: step.shouldPassScanToPage,
+					};
+				}
+			}
+
+			// Check custom validators
+			for (const validator of oOptions.validators) {
+				if (typeof validator !== 'function') {
+					sendErrorToLR('Validator is not a function', {
+						validator,
+						options: oOptions,
+					});
+					continue;
+				}
+
+				const isValid = await validator(sScanCode);
+				if (!isValid) {
+					return {
+						isValid,
+						error: 'Received code is invalid',
+					};
+				}
+			}
+
+			return { isValid: true };
+		},
+
+		/**
+		 * Validates the scan code accumulated
+		 * by the given DOM element and fires the respective events.
+		 * @private
+		 * @param DomElement oDomElement
+		 * @return boolean
+		 */
+		_validateScanCode: async function(oDomElement, sScanCode){
+			const oScannerData = oDomElement.scannerDetectionData;
+			const oOptions = oScannerData.options;
+			const iSingleScanQty = oScannerData.options.singleScanQty;
+			const iFirstCharTime = oScannerData.vars.firstCharTime;
+			const iLastCharTime = oScannerData.vars.lastCharTime;
+
+			const {
+				isValid,
+				error,
+				shouldTriggerEnterEvent = true,
+				shouldPassScanToPage = true,
+			} = await onScan._runValidators(oDomElement, sScanCode);
+
+			if (isValid) {
+				oOptions.onScan.call(oDomElement, sScanCode, iSingleScanQty);
+				onScan._reinitialize(oDomElement);
+				return true;
+			}
+
+			const oScanError = {
+				message: error,
+				scanCode: sScanCode,
+				scanDuration: iLastCharTime - iFirstCharTime,
+				avgTimeByChar: oOptions.avgTimeByChar,
+				minLength: oOptions.minLength,
+			};
+
 			oOptions.onScanError.call(oDomElement, oScanError);
-			
-			oEvent = new CustomEvent(
-				'scanError', 
-				{detail: oScanError}
-			);
-			oDomElement.dispatchEvent(oEvent);
-			
+			if (shouldPassScanToPage) {
+				onScan.bypassAndSimulateScan(oDomElement, sScanCode, shouldTriggerEnterEvent);
+			}
 			onScan._reinitialize(oDomElement);
 			return false;
-	    },
-	
-	    /**
-	     * @private
-	     * @param Object oDefaults
-	     * @param Object oOptions
-	     * @return Object
-	     */
+		},
+
+		/**
+		 * @private
+		 * @param Object oDefaults
+		 * @param Object oOptions
+		 * @return Object
+		 */
 		_mergeOptions: function(oDefaults, oOptions){
 			var oExtended = {};
 			var prop;
@@ -367,7 +512,7 @@
 		 * @param KeyboardEvent e
 		 * @return void
 		 */
-		_handleKeyDown: function(e){
+		_handleKeyEvent: async function(e){
 			var iKeyCode = onScan._getNormalizedKeyNum(e);
 			var oOptions = this.scannerDetectionData.options;
 			var oVars = this.scannerDetectionData.vars;
@@ -375,27 +520,32 @@
 			
 			if (oOptions.onKeyDetect.call(this, iKeyCode, e) === false) {
 				return;
-			}		
-			
-			if (onScan._isFocusOnIgnoredElement(this)){
+			}
+
+			if (onScan._isFocusOnIgnoredElement(this)
+				|| onScan._isEventTargetIgnoredElement(this, e)) {
 				return;
 			}
-						
-	        // If it's just the button of the scanner, ignore it and wait for the real input
-		    if(oOptions.scanButtonKeyCode !== false && iKeyCode==oOptions.scanButtonKeyCode) {
-				
+
+			// If it's just the button of the scanner, ignore it and wait for the real input
+			if (oOptions.scanButtonKeyCode !== false && iKeyCode == oOptions.scanButtonKeyCode) {
+
 				// if the button was first pressed, start a timeout for the callback, which gets interrupted if the scanbutton gets released
-				if (!oVars.longPressed){
-					oVars.longPressTimer = setTimeout( oOptions.onScanButtonLongPress, oOptions.scanButtonLongPressTime, this);
+				if (!oVars.longPressed) {
+					oVars.longPressTimer = setTimeout(
+						oOptions.onScanButtonLongPress,
+						oOptions.scanButtonLongPressTime,
+						this,
+					);
 					oVars.longPressed = true;
 				}
-	
+
 				return;
-	        }
-			
-			switch(true){
+			}
+
+			switch (true) {
 				// If it's not the first character and we encounter a terminating character, trigger scan process
-				case (oVars.firstCharTime && oOptions.suffixKeyCodes.indexOf(iKeyCode)!==-1):
+				case (oVars.firstCharTime && oOptions.suffixKeyCodes.indexOf(iKeyCode) !== -1):
 					e.preventDefault();
 					e.stopImmediatePropagation();
 					bScanFinished=true;
@@ -410,8 +560,23 @@
 					
 				// Otherwise, just add the character to the scan string we're building	
 				default:
-					var character = oOptions.keyCodeMapper.call(this, e);
-					if (character === null){
+					if (e instanceof CustomKeyEvent && e.bypassOnscan) {
+						// move to web page and do not process
+						return;
+					}
+
+					var character = '';
+					if (e.type === 'keypress') {
+						/**
+						 *  if the key is a any key with length > 1, return an empty string because
+						 *  it's not a character it's a special key like tab, enter, etc.
+						 */
+						character = e.key.length === 1 ? e.key : null;
+					} else if (e.type === 'keydown') {
+						character = oOptions.keyCodeMapper.call(this, e);
+					}
+
+					if (character === null) {
 						return;
 					}
 					oVars.accumulatedString += character;
@@ -438,7 +603,7 @@
 			}
 			
 			if(bScanFinished){
-				onScan._validateScanCode(this, oVars.accumulatedString);
+				await onScan._validateScanCode(this, oVars.accumulatedString);
 				oVars.testTimer=false;
 			} else {
 				oVars.testTimer=setTimeout(onScan._validateScanCode, oOptions.timeBeforeScanTest, this, oVars.accumulatedString);
@@ -453,14 +618,15 @@
 		 * @param Event e
 		 * @return void
 		 */
-		_handlePaste: function(e){
+		_handlePaste: async function(e){
 	
 			var oOptions = this.scannerDetectionData.options;
 			var oVars = this.scannerDetectionData.vars;
 			var sPasteString = (event.clipboardData || window.clipboardData).getData('text');
 			
 			// if the focus is on an ignored element, abort
-			if (onScan._isFocusOnIgnoredElement(this)){
+			if (onScan._isFocusOnIgnoredElement(this)
+				|| onScan._isEventTargetIgnoredElement(this, e)) {
 				return;
 			}
 			
@@ -476,7 +642,7 @@
 			oVars.lastCharTime = 0;
 			
 			// validate the string
-			onScan._validateScanCode(this, sPasteString);
+			await onScan._validateScanCode(this, sPasteString);
 			return;
 		},
 		
@@ -487,7 +653,8 @@
 		 */
 		_handleKeyUp: function(e){
 			// if the focus is on an ignored element, abort
-			if (onScan._isFocusOnIgnoredElement(this)){
+			if (onScan._isFocusOnIgnoredElement(this)
+				|| onScan._isEventTargetIgnoredElement(this, e)) {
 				return;
 			}
 			

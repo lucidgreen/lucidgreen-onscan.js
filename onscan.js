@@ -381,18 +381,18 @@
 			const validationSteps = [
 				{
 					validate: () => sScanCode.length >= oOptions.minLength,
-					errorMessage: 'Received code is shorter than minimal length',
+					errorMessage: `Scanned value can\\'t be shorter than {oOptions.minLength} characters.`,
 					shouldTriggerEnter: false,
 				},
 				{
 					validate: () => (iLastCharTime - iFirstCharTime)
 						<= (sScanCode.length * oOptions.avgTimeByChar),
-					errorMessage: 'Received code was not entered in time',
+					errorMessage: 'Scanned value is entered too slowly.',
 					shouldTriggerEnter: false,
 				},
 				{
 					validate: () => vars.isCurrentlyProcessing === false,
-					errorMessage: 'scan is currently in progress',
+					errorMessage: 'A currently scanned value is still being processed.',
 					shouldTriggerEnter: false,
 					shouldPassScanToPage: false,
 				},
@@ -423,7 +423,7 @@
 				if (!isValid) {
 					return {
 						isValid,
-						error: 'Received code is invalid',
+						error: `Scanned value has failed ${validator.name} validation`,
 					};
 				}
 			}

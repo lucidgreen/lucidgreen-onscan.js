@@ -381,7 +381,7 @@
 			const validationSteps = [
 				{
 					validate: () => sScanCode.length >= oOptions.minLength,
-					errorMessage: `Scanned value can\\'t be shorter than {oOptions.minLength} characters.`,
+					errorMessage: `Scanned value can't be shorter than ${oOptions.minLength} characters.`,
 					shouldTriggerEnter: false,
 				},
 				{

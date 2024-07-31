@@ -104,7 +104,7 @@
 			}
 
 			if (oDomElement.scannerDetectionData.options.useKeypressOverKeyDown) {
-				oDomElement.addEventListener('keypress', this._handleKeyEvent, oDomElement.scannerDetectionData.options.captureEvents);
+				oDomElement.removeEventListener('keypress', this._handleKeyEvent, oDomElement.scannerDetectionData.options.captureEvents);
 			}
 
 			if (!oDomElement.scannerDetectionData.options.useKeypressOverKeyDown) {

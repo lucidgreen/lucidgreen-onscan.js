@@ -1,3 +1,15 @@
+class LucidRetailKeyboardEvent extends KeyboardEvent {
+	constructor(type, bypassOnscan, eventInitDict = {}) {
+		// Call the parent constructor
+		super(type, { ...eventInitDict });
+
+		// Add custom property
+		if (bypassOnscan) {
+			this.bypassOnscan = true;
+		}
+	}
+}
+
 /*
  * onScan.js - scan-events for hardware barcodes scanners in javascript
  */
@@ -46,6 +58,7 @@
 				useKeypressOverKeyDown: false, // to use keypress instead of keydown
 				validators: [], // array of functions to validate the input
 				unlockCountDown: 5000, // time to wait before resetting the in process scan
+				errorCallback:function(error, extraDetails){}, // callback to handle errors
 			};
 
 			oOptions = this._mergeOptions(oDefaults, oOptions);
@@ -217,7 +230,7 @@
 			this._reinitialize(oDomElement);
 			for (let i = 0; i < string.length; i++) {
 				const key = string[i];
-				this.dispatchCustomKeyEvent(
+				this.dispatchLucidRetailKeyboardEvent(
 					oDomElement,
 					{
 						key,
@@ -230,7 +243,7 @@
 			}
 
 			if (dispatchEnterSuffix) {
-				this.dispatchCustomKeyEvent(oDomElement, {
+				this.dispatchLucidRetailKeyboardEvent(oDomElement, {
 					key: 'Enter',
 					code: 'Enter',
 					charCode: 13,
@@ -242,8 +255,8 @@
 			return this;
 		},
 
-		dispatchCustomKeyEvent(oDomElement, eventDict, customProperty) {
-			if (typeof CustomKeyEvent === 'undefined') {
+		dispatchLucidRetailKeyboardEvent(oDomElement, eventDict, customProperty) {
+			if (typeof LucidRetailKeyboardEvent === 'undefined') {
 				return;
 			}
 
@@ -251,7 +264,7 @@
 			const oOptions = oScannerData.options;
 			const eventType = oOptions.useKeypressOverKeyDown ? 'keypress' : 'keydown';
 			// Create an instance of the custom event
-			const event = new CustomKeyEvent(eventType, customProperty, {
+			const event = new LucidRetailKeyboardEvent(eventType, customProperty, {
 				...eventDict,
 				bubbles: true,
 				cancelable: true,
@@ -412,7 +425,7 @@
 			// Check custom validators
 			for (const validator of oOptions.validators) {
 				if (typeof validator !== 'function') {
-					sendErrorToLR('Validator is not a function', {
+					oOptions.errorCallback(new Error('Validator is not a function'), {
 						validator,
 						options: oOptions,
 					});
@@ -560,7 +573,7 @@
 					
 				// Otherwise, just add the character to the scan string we're building	
 				default:
-					if (e instanceof CustomKeyEvent && e.bypassOnscan) {
+					if (e instanceof LucidRetailKeyboardEvent && e.bypassOnscan) {
 						// move to web page and do not process
 						return;
 					}

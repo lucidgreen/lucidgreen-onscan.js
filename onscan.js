@@ -393,6 +393,12 @@ class LucidRetailKeyboardEvent extends KeyboardEvent {
 
 			const validationSteps = [
 				{
+					validate: () => vars.isCurrentlyProcessing === false,
+					errorMessage: 'A currently scanned value is still being processed.',
+					shouldTriggerEnter: false,
+					shouldPassScanToPage: false,
+				},
+				{
 					validate: () => sScanCode.length >= oOptions.minLength,
 					errorMessage: `Scanned value can't be shorter than ${oOptions.minLength} characters.`,
 					shouldTriggerEnter: false,
@@ -402,13 +408,7 @@ class LucidRetailKeyboardEvent extends KeyboardEvent {
 						<= (sScanCode.length * oOptions.avgTimeByChar),
 					errorMessage: 'Scanned value is entered too slowly.',
 					shouldTriggerEnter: false,
-				},
-				{
-					validate: () => vars.isCurrentlyProcessing === false,
-					errorMessage: 'A currently scanned value is still being processed.',
-					shouldTriggerEnter: false,
-					shouldPassScanToPage: false,
-				},
+				}
 			];
 
 			for (const step of validationSteps) {

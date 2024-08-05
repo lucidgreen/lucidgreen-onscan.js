@@ -457,23 +457,23 @@ class LucidRetailKeyboardEvent extends KeyboardEvent {
 			const iSingleScanQty = oScannerData.options.singleScanQty;
 			const iFirstCharTime = oScannerData.vars.firstCharTime;
 			const iLastCharTime = oScannerData.vars.lastCharTime;
-
+			const scannedCode = sScanCode.trim();
 			const {
 				isValid,
 				error,
 				shouldTriggerEnterEvent = true,
 				shouldPassScanToPage = true,
-			} = await onScan._runValidators(oDomElement, sScanCode);
+			} = await onScan._runValidators(oDomElement, scannedCode);
 
 			if (isValid) {
-				oOptions.onScan.call(oDomElement, sScanCode, iSingleScanQty);
+				oOptions.onScan.call(oDomElement, scannedCode, iSingleScanQty);
 				onScan._reinitialize(oDomElement);
 				return true;
 			}
 
 			const oScanError = {
 				message: error,
-				scanCode: sScanCode,
+				scanCode: scannedCode,
 				scanDuration: iLastCharTime - iFirstCharTime,
 				avgTimeByChar: oOptions.avgTimeByChar,
 				minLength: oOptions.minLength,
@@ -481,7 +481,7 @@ class LucidRetailKeyboardEvent extends KeyboardEvent {
 
 			oOptions.onScanError.call(oDomElement, oScanError);
 			if (shouldPassScanToPage) {
-				onScan.bypassAndSimulateScan(oDomElement, sScanCode, shouldTriggerEnterEvent);
+				onScan.bypassAndSimulateScan(oDomElement, scannedCode, shouldTriggerEnterEvent);
 			}
 			onScan._reinitialize(oDomElement);
 			return false;
